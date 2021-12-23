@@ -499,9 +499,230 @@ WHERE meal[1][1:3] && '{"сосиска"}'::text[];`
 (1 row)
 ```
 ### <a name="HW4"></a> [ДЗ 4]
+#### №2
+> Посмотрите, какие ограничения уже наложены на атрибуты таблицы «Успеваемость» (progress). Воспользуйтесь командой \d утилиты psql. А теперь предложите для этой таблицы ограничение уровня таблицы.
+
 
 ### <a name="HW5"></a> [ДЗ 5]
+#### №2
+> Предложите шаблон поиска в операторе LIKE для выбора из этой таблицы всех
+пассажиров с фамилиями, состоящими из пяти букв.
+
+`SELECT passenger_name
+FROM tickets
+WHERE passenger_name LIKE '% _____';`
+
+#### №7
+> К сожалению, в этой выборке информация дублируется. Пары городов приведены по два раза: для рейса «туда» и для рейса «обратно». Модифицируйте запрос
+таким образом, чтобы каждая пара городов была выведена только один раз:
+
+INPUT:
+```
+SELECT DISTINCT least(departure_city, arrival_city), greatest(departure_city, arrival_city),
+FROM routes r
+JOIN aircrafts a ON r.aircraft_code = a.aircraft_code
+WHERE a.model = 'Boeing 777-300'
+ORDER BY 1;
+```
+#### №9
+> А с помощью какого запроса можно получить результат в таком виде?
+```
+departure_city | arrival_city | count
+----------------+-----------------+-------
+Москва | Санкт-Петербург | 12
+```
+
+С помощью
+```
+SELECT departure_city, arrival_city, count( * )
+FROM routes
+WHERE departure_city = 'Москва'
+AND arrival_city = 'Санкт-Петербург';
+```
+
+#### №13
+> А как выявить те направления, на которые не было продано ни одного билета?
+Один из вариантов решения такой: если на рейсы, отправляющиеся по какомуто направлению, не было продано ни одного билета, то максимальная и минимальная цены будут равны NULL. Нужно получить выборку в таком виде:
+
+```
+departure_city | arrival_city | max | min
+---------------------+---------------------+-----------+----------
+Абакан | Архангельск | |
+Абакан | Грозный | |
+Абакан | Кызыл | |
+Абакан | Москва | 101000.00 | 33700.00
+Абакан | Новосибирск | 5800.00 | 5800.00
+```
+
+INPUT:
+
+```
+SELECT f.departure_city, f.arrival_city, max( tf.amount ), min( tf.amount )
+  FROM flights_v f
+  LEFT JOIN ticket_flights tf ON f.flight_id = tf.flight_id
+  GROUP BY 1, 2
+  ORDER BY 1, 2;
+```
+
+#### №19
+
+> В разделе 6.4 мы использовали рекурсивный алгоритм в общем табличном выражении. Изучите этот пример, чтобы лучше понять работу рекурсивного алгоритма:
+
+```
+WITH RECURSIVE ranges ( min_sum, max_sum )
+AS (
+    VALUES( 0, 100000 ),
+        ( 100000, 200000 ),
+        ( 200000, 300000 )
+    UNION ALL
+    SELECT min_sum + 100000, max_sum + 100000
+    FROM ranges
+    WHERE max_sum < ( SELECT max( total_amount ) FROM bookings )
+)
+SELECT * FROM ranges;
+```
+
+> Задание 1. Модифицируйте запрос, добавив в него столбец level (можно назвать его и iteration). Этот столбец должен содержать номер текущей итерации, поэтому нужно увеличивать его значение на единицу на каждом шаге. Не
+забудьте задать начальное значение для добавленного столбца в предложении
+VALUES.
+Задание 2. Для завершения экспериментов замените UNION ALL на UNION и
+выполните запрос. Сравните этот результат с предыдущим, когда мы использовали UNION ALL.
+
+Модификация : 
+```
+WITH RECURSIVE ranges ( min_sum, max_sum )
+AS (
+    VALUES( 0, 100000 ),
+        ( 100000, 200000 ),
+        ( 200000, 300000 )
+    UNION ALL
+    SELECT level + 1, min_sum + 100000, max_sum + 100000
+    FROM ranges
+    WHERE max_sum < ( SELECT max( total_amount ) FROM bookings )
+)
+SELECT * FROM ranges;
+```
+
+Для данных запросов `UNION ALL` на каждой итерации добавляла по 3 строки, а `UNINON` ровно по 1.
+
+Вывод соотвественно: `36 rows returned`, `13 rows returned`. Опустил вывод таблиц, т.к они довольно большие и займут много места.
 ### <a name="HW6"></a> [ДЗ 6]
+#### №1
+> Добавьте в определение таблицы aircrafts_log значение по умолчанию
+current_timestamp и соответствующим образом измените команды INSERT,
+приведенные в тексте главы.
+
+`CREATE TEMP TABLE aircrafts_log AS
+SELECT * FROM aircrafts WITH NO DATA;`
+
+```
+ALTER TABLE aircrafts_log
+ADD COLUMN when_add timestamp;
+```
+
+```
+ALTER TABLE aircrafts_log
+ALTER COLUMN when_add SET DEFAULT current_timestamp;
+```
+
+```
+WITH add_row AS
+    ( 
+        INSERT INTO aircrafts_tmp
+        VALUES ( 'TEST', 'TEST-3000', 3000 )
+        ON CONFLICT DO NOTHING
+        RETURNING *
+    )
+INSERT INTO aircrafts_log(aircraft_code, model, range, operation)
+SELECT add_row.aircraft_code, add_row.model, add_row.range, 'INSERT'
+FROM add_row;
+```
+
+#### №2
+> В предложении RETURNING можно указывать не только символ «∗», означающий
+выбор всех столбцов таблицы, но и более сложные выражения, сформированные
+на основе этих столбцов. В тексте главы мы копировали содержимое таблицы
+«Самолеты» в таблицу aircrafts_tmp, используя в предложении RETURNING
+именно «∗». Однако возможен и другой вариант запроса:
+```
+WITH add_row AS
+    ( INSERT INTO aircrafts_tmp
+        SELECT * FROM aircrafts
+        RETURNING aircraft_code, model, range,
+        current_timestamp, 'INSERT'
+    )
+    INSERT INTO aircrafts_log
+SELECT ? FROM add_row;
+```
+Что нужно написать в этом запросе вместо вопросительного знака?
+
+Можем честно указать все необходимые поля, которые нужно выписать, а можем просто выставить `*`, так как в `RETURNING` мы уже указали необходимые поля.
+#### №4
+
+> > В тексте главы в предложениях ON CONFLICT команды INSERT мы использовали только выражения, состоящие из имени одного столбца. Однако в таблице
+«Места» (seats) первичный ключ является составным и включает два столбца.
+Напишите команду INSERT для вставки новой строки в эту таблицу и предусмотрите возможный конфликт добавляемой строки со строкой, уже имеющейся в таблице. Сделайте два варианта предложения ON CONFLICT: первый — с использованием перечисления имен столбцов для проверки наличия дублирования, второй — с использованием предложения ON CONSTRAINT.
+Для того чтобы не изменить содержимое таблицы «Места», создайте ее копию
+и выполняйте все эти эксперименты с таблицей-копией.
+
+FIRST:
+```
+INSERT INTO seats2 VALUES (733, '2D', 'Business')
+ON CONFLICT (aircraft_code, seat_no) DO UPDATE SET
+fare_conditions=excluded.fare_conditions RETURNING 0;
+```
+
+SECOND:
+```
+INSERT INTO seats2 VALUES (733, '2D', 'Economy')
+ON CONFLICT ON CONSTRAINT seats_pkey
+DO UPDATE SET fare_conditions=excluded.fare_conditions RETURNING *;
+```
 ### <a name="HW7"></a> [ДЗ 7]
+#### №1
+> Предположим, что для какой-то таблицы создан уникальный индекс по двум
+столбцам: column1 и column2. В таблице есть строка, у которой значение атрибута column1 равно ABC, а значение атрибута column2 — NULL. Мы решили
+добавить в таблицу еще одну строку с такими же значениями ключевых атрибутов, т. е. column1 — ABC, а column2 — NULL.
+Как вы думаете, будет ли операция вставки новой строки успешной или завершится с ошибкой? Объясните ваше решение
+
+Предлагаю проверить экспериментально: 
+Создаем таблицу
+`CREATE TABLE TEST (c1 text, c2 text);`
+Вносим значение
+`INSERT INTO TEST (c1) VALUES ('ABC');`
+Добавляем индекс
+`CREATE UNIQUE INDEX unique_rest ON TEST (c1, c2);`
+
+```
+              Table "public.test"
+ Column | Type | Collation | Nullable | Default 
+--------+------+-----------+----------+---------
+ c1     | text |           |          | 
+ c2     | text |           |          | 
+Indexes:
+    "unique_rest" UNIQUE, btree (c1, c2)
+```
+
+Попробуем вставить второ значение: 
+`INSERT INTO TEST (c1) VALUES ('ABC');`
+
+```
+SELECT * FROM TEST;
+ c1  | c2 
+-----+----
+ ABC | 
+ ABC | 
+(2 rows)
+```
+
+Вероятно, NULL != NULL, и проверки проходят успешно и значения вставляются.
+
+#### №4
+TODO
 ### <a name="HW8"></a> [ДЗ 8]
+
+#### №2
+> Модифицируйте сценарий выполнения транзакций: в первой транзакции вместо фиксации изменений выполните их отмену с помощью команды ROLLBACK и посмотрите, будет ли удалена строка и какая конкретно
+
+
 ### <a name="HW9"></a> [ДЗ 9]
