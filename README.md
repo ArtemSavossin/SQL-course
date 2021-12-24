@@ -717,12 +717,292 @@ SELECT * FROM TEST;
 
 Вероятно, NULL != NULL, и проверки проходят успешно и значения вставляются.
 
-#### №4
-TODO
+#### №3
+> Создайте индекс по столбцу fare_conditions. Конечно, в реальной ситуации
+такой индекс вряд ли целесообразен, но нам он нужен для экспериментов.
+Проделайте те же эксперименты с таблицей ticket_flights. Будет ли различаться среднее время выполнения запросов для различных значений атрибута
+fare_conditions? Почему это имеет место?
+
+Для начала запустим запросы без индекса и выпишем время: 
+
+Для 
+```
+SELECT count( * )
+FROM ticket_flights
+WHERE fare_conditions = 'Comfort';
+```
+Я получил: Time: 51.552 ms, Time: 50.557 ms, Time: 48.756 ms
+
+Для :
+
+```
+SELECT count( * )
+FROM ticket_flights
+WHERE fare_conditions = 'Business';
+```
+
+Я получил: Time: 48.756 ms, Time: 46.867 ms, Time: 45.864 ms
+
+Для: 
+
+```
+SELECT count( * )
+FROM ticket_flights
+WHERE fare_conditions = 'Economy';
+```
+Я получил: Time: 53.440 ms, Time: 61.099 ms, Time: 61.233 ms
+
+Теперь добавим индекс:
+`CREATE INDEX index ON ticket_flights (fare_conditions)`
+
+И выполним те же эксперименты с таблицей:
+
+Для 
+```
+SELECT count( * )
+FROM ticket_flights
+WHERE fare_conditions = 'Comfort';
+```
+Я получил: Time: 2.853 ms, Time: 2.100 ms, Time: 1.936 ms
+
+Для :
+
+```
+SELECT count( * )
+FROM ticket_flights
+WHERE fare_conditions = 'Business';
+```
+
+Я получил: Time: 14.124 ms, Time: 8.672 ms, Time: 8.303 ms
+
+Для: 
+
+```
+SELECT count( * )
+FROM ticket_flights
+WHERE fare_conditions = 'Economy';
+```
+Я получил: Time: 29.632 ms, Time: 29.416 ms, Time: 29.428 ms
+
+Сделаем таблицу сравнения результатов:
+
+Без индексов:
+```
+              | EXP1 | EXP2 | EXP3 | AVG |
+______________|______|______|______|_____|
+'Economy'     |53.440|61.099|61.233|58.59|
+______________|___________________________
+'Comfort'     |51.552|50.557|48.756|50.26|
+______________|___________________________
+'Business'    |48.756|46.867|45.864|47.16|     
+```
+
+C индексами:
+
+```
+              | EXP1 | EXP2 | EXP3 | AVG |
+______________|______|______|______|_____|
+'Economy'     |53.440|61.099|61.233|58.59|
+______________|___________________________
+'Comfort'     | 2.853| 2.100| 1.936| 2.29|
+______________|___________________________
+'Business'    |14.124| 8.672| 8.303|10.37|       
+```
+
+Очевидно, что с индексами скорость повышается.
 ### <a name="HW8"></a> [ДЗ 8]
 
 #### №2
 > Модифицируйте сценарий выполнения транзакций: в первой транзакции вместо фиксации изменений выполните их отмену с помощью команды ROLLBACK и посмотрите, будет ли удалена строка и какая конкретно
 
+```
+SELECT * FROM aircrafts_tmp
+WHERE range < 2000;
+ aircraft_code |       model        | range 
+---------------+--------------------+-------
+ CN1           | Cessna 208 Caravan |  1200
+```
+
+Модификация с rollback: 
+
 
 ### <a name="HW9"></a> [ДЗ 9]
+#### №3
+>Самостоятельно выполните команду EXPLAIN для запроса, содержащего общее
+табличное выражение (CTE). Посмотрите, на каком уровне находится узел плана, отвечающий за это выражение, как он оформляется. Учтите, что общие табличные выражения всегда материализуются, т. е. вычисляются однократно и
+результат их вычисления сохраняется в памяти, а затем все последующие обращения в рамках запроса направляются уже к этому материализованному результату.
+```
+EXPLAIN SELECT * FROM aircrafts_tmp;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Seq Scan on aircrafts_tmp  (cost=0.00..20.20 rows=1020 width=52)
+(1 row)
+```
+```
+EXPLAIN with add_row AS
+( INSERT INTO aircrafts_tmp
+SELECT * FROM aircrafts
+RETURNING *
+)
+INSERT INTO aircrafts_log
+SELECT add_row.aircraft_code, add_row.model, add_row.range,
+current_timestamp, 'INSERT'
+FROM add_row;
+                               QUERY PLAN                               
+------------------------------------------------------------------------
+ Insert on aircrafts_log  (cost=1.09..1.31 rows=0 width=0)
+   CTE add_row
+     ->  Insert on aircrafts_tmp  (cost=0.00..1.09 rows=9 width=52)
+           ->  Seq Scan on aircrafts  (cost=0.00..1.09 rows=9 width=52)
+   ->  CTE Scan on add_row  (cost=0.00..0.22 rows=9 width=92)
+(5 rows)
+```
+
+#### №8
+> Исследуйте планы выполнения обоих запросов. Попытайтесь найти объяснение различиям в эффективности их выполнения. Чтобы получить усредненную
+картину, выполните каждый запрос несколько раз. Поскольку таблицы, участвующие в запросах, небольшие, то различие по абсолютным затратам времени
+выполнения будет незначительным. Но если бы число строк в таблицах было
+большим, то экономия ресурсов сервера могла оказаться заметной
+
+Первый запрос:
+```
+EXPLAIN ANALYZE
+SELECT a.aircraft_code AS a_code,
+a.model,
+( SELECT count( r.aircraft_code )
+FROM routes r
+WHERE r.aircraft_code = a.aircraft_code
+) AS num_routes
+FROM aircrafts a
+GROUP BY 1, 2
+ORDER BY 3 DESC;
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=236.31..236.34 rows=9 width=56) (actual time=16.300..16.443 rows=9 loops=1)
+   Sort Key: ((SubPlan 1)) DESC
+   Sort Method: quicksort  Memory: 25kB
+   ->  HashAggregate  (cost=1.11..236.17 rows=9 width=56) (actual time=4.043..15.689 rows=9 loops=1)
+         Group Key: a.aircraft_code
+         Batches: 1  Memory Usage: 24kB
+         ->  Seq Scan on aircrafts a  (cost=0.00..1.09 rows=9 width=48) (actual time=0.011..0.095 rows=9 loops=1)
+         SubPlan 1
+           ->  Aggregate  (cost=26.10..26.11 rows=1 width=8) (actual time=1.677..1.688 rows=1 loops=9)
+                 ->  Seq Scan on routes r  (cost=0.00..25.88 rows=89 width=4) (actual time=0.033..0.921 rows=79 loops=9)
+                       Filter: (aircraft_code = a.aircraft_code)
+                       Rows Removed by Filter: 631
+ Planning Time: 1.724 ms
+ Execution Time: 16.785 ms
+(14 rows)
+```
+
+Второй запрос: 
+```
+EXPLAIN ANALYZE
+SELECT a.aircraft_code AS a_code,
+a.model,
+
+count( r.aircraft_code ) AS num_routes
+FROM aircrafts a
+
+LEFT OUTER JOIN routes r
+
+ON r.aircraft_code = a.aircraft_code
+GROUP BY 1, 2
+
+ORDER BY 3 DESC;
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=31.83..31.85 rows=9 width=56) (actual time=29.264..29.504 rows=9 loops=1)
+   Sort Key: (count(r.aircraft_code)) DESC
+   Sort Method: quicksort  Memory: 25kB
+   ->  HashAggregate  (cost=31.60..31.69 rows=9 width=56) (actual time=29.077..29.231 rows=9 loops=1)
+         Group Key: a.aircraft_code
+         Batches: 1  Memory Usage: 24kB
+         ->  Hash Right Join  (cost=1.20..28.05 rows=710 width=52) (actual time=1.409..21.822 rows=711 loops=1)
+               Hash Cond: (r.aircraft_code = a.aircraft_code)
+               ->  Seq Scan on routes r  (cost=0.00..24.10 rows=710 width=4) (actual time=0.008..6.572 rows=710 loops=1)
+               ->  Hash  (cost=1.09..1.09 rows=9 width=48) (actual time=0.271..0.296 rows=9 loops=1)
+                     Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                     ->  Seq Scan on aircrafts a  (cost=0.00..1.09 rows=9 width=48) (actual time=0.019..0.107 rows=9 loops=1)
+ Planning Time: 0.336 ms
+ Execution Time: 29.694 ms
+(14 rows)
+```
+
+> Предложите аналогичную пару запросов к базе данных «Авиаперевозки». Проведите необходимые эксперименты с вашими запросами.
+
+Запросы: 
+
+```
+SELECT a.city AS city,
+a.timezone,
+(SELECT count(r.arrival_city) FROM routes r WHERE r.arrival_city = a.city) AS count
+FROM airports a
+WHERE a.timezone = 'Europe/Samara';
+   city    |   timezone    | count 
+-----------+---------------+-------
+ Ижевск    | Europe/Samara |     1
+ Астрахань | Europe/Samara |     4
+ Самара    | Europe/Samara |     3
+ Ульяновск | Europe/Samara |    11
+ Ульяновск | Europe/Samara |    11
+(5 rows)
+```
+Второй запрос : 
+```
+SELECT a.city AS city,
+a.timezone, count (r.arrival_city) as ar
+FROM airports a
+LEFT OUTER JOIN routes r
+ON r.arrival_city = a.city
+GROUP BY 1, 2;
+
+RETURNED (101 rows)
+```
+
+Аналитика: 
+
+1:
+```
+EXPLAIN ANALYZE SELECT a.city AS city,
+a.timezone,
+(SELECT count(r.arrival_city) FROM routes r WHERE r.arrival_city = a.city) AS count
+FROM airports a
+WHERE a.timezone = 'Europe/Samara';
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Seq Scan on airports a  (cost=0.00..132.81 rows=5 width=40) (actual time=0.368..1.631 rows=5 loops=1)
+   Filter: (timezone = 'Europe/Samara'::text)
+   Rows Removed by Filter: 99
+   SubPlan 1
+     ->  Aggregate  (cost=25.89..25.90 rows=1 width=8) (actual time=0.273..0.286 rows=1 loops=5)
+           ->  Seq Scan on routes r  (cost=0.00..25.88 rows=7 width=17) (actual time=0.020..0.189 rows=6 loops=5)
+                 Filter: (arrival_city = a.city)
+                 Rows Removed by Filter: 704
+ Planning Time: 0.089 ms
+ Execution Time: 1.731 ms
+(10 rows)
+```
+2:
+```
+EXPLAIN ANALYZE SELECT a.city AS city,
+a.timezone, count (r.arrival_city) as ar
+FROM airports a
+LEFT OUTER JOIN routes r
+ON r.arrival_city = a.city
+GROUP BY 1, 2;
+                                                        QUERY PLAN                                                         
+---------------------------------------------------------------------------------------------------------------------------
+ HashAggregate  (cost=50.89..51.90 rows=101 width=40) (actual time=35.871..36.915 rows=101 loops=1)
+   Group Key: a.city, a.timezone
+   Batches: 1  Memory Usage: 32kB
+   ->  Hash Right Join  (cost=4.34..43.17 rows=1029 width=49) (actual time=2.195..25.475 rows=1029 loops=1)
+         Hash Cond: (r.arrival_city = a.city)
+         ->  Seq Scan on routes r  (cost=0.00..24.10 rows=710 width=17) (actual time=0.015..6.724 rows=710 loops=1)
+         ->  Hash  (cost=3.04..3.04 rows=104 width=32) (actual time=2.133..2.157 rows=104 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 15kB
+               ->  Seq Scan on airports a  (cost=0.00..3.04 rows=104 width=32) (actual time=0.022..1.154 rows=104 loops=1)
+ Planning Time: 0.428 ms
+ Execution Time: 37.777 ms
+(11 rows)
+```
