@@ -502,6 +502,181 @@ WHERE meal[1][1:3] && '{"сосиска"}'::text[];`
 #### №2
 > Посмотрите, какие ограничения уже наложены на атрибуты таблицы «Успеваемость» (progress). Воспользуйтесь командой \d утилиты psql. А теперь предложите для этой таблицы ограничение уровня таблицы.
 
+```
+edu=# \d progress
+                   Table "public.progress"
+   Column    |     Type     | Collation | Nullable | Default 
+-------------+--------------+-----------+----------+---------
+ record_book | numeric(5,0) |           | not null | 
+ subject     | text         |           | not null | 
+ acad_year   | text         |           | not null | 
+ term        | numeric(1,0) |           | not null | 
+ mark        | numeric(1,0) |           | not null | 5
+Check constraints:
+    "progress_mark_check" CHECK (mark >= 3::numeric AND mark <= 5::numeric)
+    "progress_term_check" CHECK (term = 1::numeric OR term = 2::numeric)
+Foreign-key constraints:
+    "progress_record_book_fkey" FOREIGN KEY (record_book) REFERENCES students(record_book) ON UPDATE CASCADE ON DELETE CASCADE
+```
+
+Предлагаемые ограничения:
+```
+ALTER TABLE progress
+ADD CHECK (
+( test_form = 'экзамен' AND mark IN ( 3, 4, 5 ) )
+OR
+( test_form = 'зачет' AND mark IN ( 0, 1 ) )
+);
+```
+
+Два запроса: 
+
+```
+edu=# INSERT INTO progress VALUES (1, 'course', 2022, 2, 1, 'экзамен');
+ERROR:  new row for relation "progress" violates check constraint "progress_check"
+DETAIL:  Failing row contains (1, course, 2022, 2, 1, экзамен).
+edu=# INSERT INTO progress VALUES (1, 'course', 2022, 2, 5, 'экзамен');
+INSERT 0 1
+```
+
+>В таблице уже было ограничение на допустимые значения атрибута mark. Как
+вы думаете, не будет ли оно конфликтовать с новым ограничением? Проверьте
+эту гипотезу. Если ограничения конфликтуют, тогда удалите старое ограничение и снова попробуйте добавить строки в таблицу.
+
+Да, колфликты будут происходить при запросе
+```
+edu=# INSERT INTO progress VALUES (1, 'course', 2022, 1, 1, 'зачет');
+ERROR:  new row for relation "progress" violates check constraint "progress_mark_check"
+DETAIL:  Failing row contains (1, course, 2022, 1, 1, зачет).
+```
+
+Т.к в нашем ограничении оценки за зачет - 1 и 0, а в ограничении на marks они 3, 4, 5.
+
+Удалим ограничение:
+```
+edu=# 
+    ALTER TABLE progress
+        DROP CONSTRAINT progress_mark_check;
+```
+
+Теперь работает: 
+
+```
+edu=# INSERT INTO progress VALUES (1, 'course', 2022, 1, 1, 'зачет');
+INSERT 0 1
+```
+
+> Подумайте, какое еще ограничение уровня таблицы можно предложить для
+этой таблицы?
+
+Можно изменить ограничения на оценки на 100 бальную или 10 бальную систему, можно выставить ограничения на названия курсов, на академический год и т.д
+#### №9
+>  В разделе 9.4 документации «Строковые функции и операторы» есть
+функция trim. Попробуйте воспользоваться ею. Если вы еще не изучили команду ALTER TABLE, то удалите таблицу students и создайте ее заново с учетом
+нового ограничения, а если уже познакомились с ней, то сделайте так:
+ALTER TABLE students ADD CHECK (...);
+
+Добавим верное органичение
+```
+edu=# ALTER TABLE students ADD CHECK (trim(name) <> '');
+ALTER TABLE
+```
+Проверим работу ограничения с помощью команд:
+```
+edu=# INSERT INTO students VALUES (1, '', 1, 1);
+ERROR:  new row for relation "students" violates check constraint "students_name_check"
+DETAIL:  Failing row contains (1, , 1, 1).
+edu=# INSERT INTO students VALUES (1, ' ', 1, 1);
+ERROR:  new row for relation "students" violates check constraint "students_name_check"
+DETAIL:  Failing row contains (1,  , 1, 1).
+edu=# INSERT INTO students VALUES (1, '  ', 1, 1);
+ERROR:  new row for relation "students" violates check constraint "students_name_check"
+DETAIL:  Failing row contains (1,   , 1, 1).
+edu=# INSERT INTO students VALUES (1, 'Artyom2', 1, 1);
+ERROR:  duplicate key value violates unique constraint "students_pkey"
+DETAIL:  Key (record_book)=(1) already exists.
+edu=# INSERT INTO students VALUES (2, 'Artyom2', 1, 1);
+INSERT 0 1
+```
+> Есть ли подобные слабые места в таблице «Успеваемость» (progress)?
+
+В таблице progress у столбцов subject, acad_year имеется такое же слабое место.
+
+#### №17
+> Подумайте, какие представления было бы целесообразно создать для нашей
+базы данных «Авиаперевозки». Необходимо учесть наличие различных групп
+пользователей, например: пилоты, диспетчеры, пассажиры, кассиры.
+Создайте представления и проверьте их в работе.
+
+Для примера, можно создать представление, в котором каждому аэропорту будет предоставляться его временной пояс: 
+
+```
+CREATE VIEW airports_timezone AS
+SELECT airport_name, city, timezone FROM bookings.airports;
+SELECT * FROM airports_timezone;
+CREATE VIEW
+     airport_name     |           city           |      timezone      
+----------------------+--------------------------+--------------------
+ Мирный               | Мирный                   | Asia/Yakutsk
+ Бегишево             | Нижнекамск               | Europe/Moscow
+ Спиченково           | Новокузнецк              | Asia/Novokuznetsk
+ Нальчик              | Нальчик                  | Europe/Moscow
+ Беслан               | Владикавказ              | Europe/Moscow
+ Чебоксары            | Чебоксары                | Europe/Moscow
+ Надым                | Надым                    | Asia/Yekaterinburg
+ Нягань               | Нягань                   | Asia/Yekaterinburg
+ Курск-Восточный      | Курск                    | Europe/Moscow
+ Саранск              | Саранск                  | Europe/Moscow
+ Донское              | Тамбов                   | Europe/Moscow
+ Советский            | Советский                | Asia/Yekaterinburg
+ Ижевск               | Ижевск                   | Europe/Samara
+ Салехард             | Салехард                 | Asia/Yekaterinburg
+ Ханты-Мансийск       | Ханты-Мансийск           | Asia/Yekaterinburg
+ Горно-Алтайск        | Горно-Алтайск            | Asia/Krasnoyarsk
+ ... skipped for shorter look
+```
+
+Или создать представления со всеми названиями портов в одном городе:
+
+```
+CREATE VIEW msk_ports AS
+SELECT * FROM.airports
+WHERE city = 'Москва';
+CREATE VIEW
+demo=# SELECT * FROM msk_ports;
+ airport_code | airport_name |  city  | longitude | latitude  |   timezone    
+--------------+--------------+--------+-----------+-----------+---------------
+ SVO          | Шереметьево  | Москва | 37.414589 | 55.972642 | Europe/Moscow
+ VKO          | Внуково      | Москва | 37.261486 | 55.591531 | Europe/Moscow
+ DME          | Домодедово   | Москва | 37.906111 | 55.408611 | Europe/Moscow
+```
+
+#### №18
+> Подумайте, какие еще таблицы было бы целесообразно дополнить
+столбцами типа json/jsonb. Вспомните, что, например, в таблице «Билеты»
+(tickets) уже есть столбец такого типа — contact_data. Выполните модификации таблиц и измените в них одну-две строки для проверки правильности
+ваших решений.
+
+Можно добавить такое поле в таблицу аэрпортов, чтобы хранить данные о команде аэропорта, например.
+
+Добавляем поле:
+```
+ALTER TABLE airports ADD COLUMN crew jsonb;
+```
+Вставляем значение:
+```
+ UPDATE airports SET crew = '{"pilots": 3, "dispetchers": 5, "type": {"gov": "2", "pers": "1"}}'::jsonb WHERE city = 'Москва';
+```
+
+Проверка:
+```
+SELECT * FROM bookings.airports WHERE city = 'Москва';
+ airport_code | airport_name |  city  | longitude | latitude  |   timezone    |                                crew                                
+--------------+--------------+--------+-----------+-----------+---------------+--------------------------------------------------------------------
+ SVO          | Шереметьево  | Москва | 37.414589 | 55.972642 | Europe/Moscow | {"type": {"gov": "2", "pers": "1"}, "pilots": 3, "dispetchers": 5}
+ VKO          | Внуково      | Москва | 37.261486 | 55.591531 | Europe/Moscow | {"type": {"gov": "2", "pers": "1"}, "pilots": 3, "dispetchers": 5}
+ DME          | Домодедово   | Москва | 37.906111 | 55.408611 | Europe/Moscow | {"type": {"gov": "2", "pers": "1"}, "pilots": 3, "dispetchers": 5}
+```
 
 ### <a name="HW5"></a> [ДЗ 5]
 #### №2
@@ -812,19 +987,65 @@ ______________|___________________________
 Очевидно, что с индексами скорость повышается.
 ### <a name="HW8"></a> [ДЗ 8]
 
-#### №2
-> Модифицируйте сценарий выполнения транзакций: в первой транзакции вместо фиксации изменений выполните их отмену с помощью команды ROLLBACK и посмотрите, будет ли удалена строка и какая конкретно
+#### №3
+> Можно ли
+говорить, что в такой ситуации имеет место потерянное обновление? Если оно
+имеет место, то что можно предпринять для его недопущения?
+
+Здесь есть потерянное обновление: 
+```
+BEGIN ISOLATION LEVEL READ COMMITTED;
+UPDATE aircrafts_tmp
+SET range = 6000
+WHERE aircraft_code = 'CR2';
+
+BEGIN ISOLATION LEVEL READ COMMITTED;
+WARNING: there is already transaction in progress;
+BEGIN
+UPDATE aircrafts_tmp
+SET range = 2000
+WHERE aircraft_code = 'CR2';
+UPDATE 1;
+
+COMMIT;
+COMMIT
+
+COMMIT;
+COMMIT
+
+SELECT * FROM aircrafts_tmp WHERE aircraft_code = 'CR2';
+aircraft_code | model               | range
+--------------+---------------------+--------
+ CR2          | Bombardier CRJ-200  | 2000
+```
+
+Можно выбрать другой уровень изоляции: 
 
 ```
-SELECT * FROM aircrafts_tmp
-WHERE range < 2000;
- aircraft_code |       model        | range 
----------------+--------------------+-------
- CN1           | Cessna 208 Caravan |  1200
+BEGIN ISOLATION LEVEL READ COMMITTED;
+UPDATE aircrafts_tmp
+SET range = range + 6000
+WHERE aircraft_code = 'CR2';
+
+BEGIN ISOLATION LEVEL READ COMMITTED;
+WARNING: there is already transaction in progress;
+BEGIN
+UPDATE aircrafts_tmp
+SET range = range + 2000
+WHERE aircraft_code = 'CR2';
+UPDATE 1;
+
+COMMIT;
+COMMIT
+
+COMMIT;
+COMMIT
+
+SELECT * FROM aircrafts_tmp WHERE aircraft_code = 'CR2';
+aircraft_code | model               | range
+--------------+---------------------+--------
+ CR2          | Bombardier CRJ-200  | 11250
 ```
-
-Модификация с rollback: 
-
 
 ### <a name="HW9"></a> [ДЗ 9]
 #### №3
